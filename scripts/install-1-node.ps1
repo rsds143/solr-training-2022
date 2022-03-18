@@ -1,1 +1,1 @@
-kubectl create -f .\k8s\1-node-68-search.yaml
+kubectl create  -n cass-operator -f .\k8s\1-node-68-search.yaml
