@@ -1,0 +1,7 @@
+# DSE Config Version: 6.8.13
+
+###########################################################################
+#                             jvm.options                                 #
+#                                                                         #
+# This file is obsolete, see jvm-clients.options and jvm-server.options.  #
+###########################################################################

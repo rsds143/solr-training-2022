@@ -1,0 +1,76 @@
+# Default values for dse.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  repository: datastax/dse-server
+  tag: 5.1.20
+  pullPolicy: IfNotPresent
+  # -g for graph -s for solr -k for analytics
+  # example helm install . --set image.args={-k,-s} for a search analytics node
+  # default is pure dse
+  args: []
+
+use_external_ip: true
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  port: 9042
+
+cassandra:
+  num_tokens: 8
+  seeds: 1 
+  replicas: 1 
+  cluster_name: "DSE Cluster"
+  dc: "DC1"
+  rack: "RACK1"
+# set disk_access_mode on 5.1 clusters
+  disk_access_mode: mmap_index_only
+  concurrent_compactors: 2
+  compaction_throughput_mb_per_sec: 16
+  memtable_allocation_type: "heap_buffers"
+  memtable_cleanup_threshold: 0.40
+  memtable_flush_writers: 2
+  memtable_heap_space_in_mb: 512
+  memtable_offheap_space_in_mb: 512
+  stream_throughput_outbound_megabits_per_sec: 200
+  inter_dc_stream_throughput_outbound_megabits_per_sec: 200
+  phi_convict_threshold: 8
+  jvm:
+    heap_size: "2G"
+    extra: ""
+    #to disable backpressure do the following
+    #extra: "-Ddse.tpc.disable_backpressure=true"
+  #tpc_cores: 4
+
+dse:
+  max_solr_concurrent_per_core: 4
+  back_pressure_threshold_per_core: 10000
+  enable_health_based_routing: true
+storage:
+  cassandra:
+    data:
+      size: 40Gi
+    logs:
+      enable: false
+      size: 10Gi
+  spark:
+    enable: false 
+    data:
+      size: 15Gi
+    logs:
+      size: 10Gi
+  dsefs:
+    enable: false 
+    size: 10Gi
+
+resources:
+  cpu: 4000m 
+  mem: 3Gi 
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

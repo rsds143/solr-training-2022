@@ -1,0 +1,30 @@
+{{ if .Values.use_external_ip }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{include "datastax-dse.fullname" . }}-nodeport
+  labels:
+    app.kubernetes.io/name: {{ include "datastax-dse.name" . }}
+    helm.sh/chart: {{ include "datastax-dse.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  ports:
+    - port: 9042
+      nodePort: 30942
+      protocol: TCP
+      name: cql
+    - port: 7199
+      nodePort: 30799
+      protocol: TCP
+      name: jmx
+    - port: 8983
+      nodePort: 30893
+      protocol: TCP
+      name: solrhttp
+  selector:
+    app.kubernetes.io/name: {{ include "datastax-dse.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{ end }}

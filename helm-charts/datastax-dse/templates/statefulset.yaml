@@ -1,0 +1,296 @@
+apiVersion: "apps/v1" # for k8s versions before 1.9.0 use apps/v1beta2  and before 1.8.0 use extensions/v1beta1
+kind: StatefulSet
+metadata:
+  name: {{ include "datastax-dse.fullname" . }}
+  annotations:
+    checksum/cassconfig: {{ include (print $.Template.BasePath "/configMap-cass.yaml") .  | sha256sum }}
+    checksum/dseconfig: {{ include (print $.Template.BasePath "/configMap-dse.yaml") .  | sha256sum }}
+    checksum/sparkconfig: {{ include (print $.Template.BasePath "/configMap-spark.yaml") .  | sha256sum }}
+  labels:
+    app.kubernetes.io/name: {{ include "datastax-dse.name" . }}
+    helm.sh/chart: {{ include "datastax-dse.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  serviceName: {{ include "datastax-dse.fullname" . }} 
+  replicas: {{ .Values.cassandra.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "datastax-dse.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "datastax-dse.name" . }}
+        helm.sh/chart: {{ include "datastax-dse.chart" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+    spec:
+      terminationGracePeriodSeconds: 1800
+    {{- if .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 8 }}
+    {{- end }}
+      initContainers:
+      - name: {{ .Chart.Name }}-init
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: DISK_ACCESS_MODE
+          value: "{{ .Values.cassandra.disk_access_mode }}"
+        - name: DSEYAML_max_solr_concurrency_per_core
+          value: "{{ .Values.dse.max_solr_concurrency_per_core }}"
+        - name: DSEYAML_enable_health_based_routing
+          value: "{{ .Values.dse.enable_health_based_routing }}"
+        - name: DSEYAML_back_pressure_threshold_per_core
+          value: "{{ .Values.dse.back_pressure_threshold_per_core }}"
+        - name: CASSYAML_tpc_cores
+          value: "{{ .Values.cassandra.tpc_cores }}"
+        - name: CASSYAML_compaction_throughput_mb_per_sec
+          value: "{{ .Values.cassandra.compaction_throughput_mb_per_sec }}"
+        - name: CASSYAML_concurrent_compactors
+          value: "{{ .Values.cassandra.concurrent_compactors }}"
+        - name: CASSYAML_stream_throughput_outbound_megabits_per_sec
+          value: "{{ .Values.cassandra.stream_throughput_outbound_megabits_per_sec }}"
+        - name: CASSYAML_inter_dc_stream_throughput_outbound_megabits_per_sec
+          value: "{{ .Values.cassandra.inter_dc_stream_throughput_outbound_megabits_per_sec }}"
+        - name: CASSYAML_memtable_cleanup_threshold
+          value: "{{ .Values.cassandra.memtable_cleanup_threshold }}"
+        - name: CASSYAML_memtable_flush_writers
+          value: "{{ .Values.cassandra.memtable_flush_writers }}"
+        - name: CASSYAML_memtable_heap_space_in_mb
+          value: "{{ .Values.cassandra.memtable_heap_space_in_mb }}"
+        - name: CASSYAML_memtable_offheap_space_in_mb
+          value: "{{ .Values.cassandra.memtable_offheap_space_in_mb }}"
+        - name: CASSYAML_phi_convict_threshold
+          value: "{{ .Values.cassandra.phi_convict_threshold }}"
+        - name: CASSYAML_memtable_allocation_type
+          value: "{{ .Values.cassandra.memtable_allocation_type }}"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        command:
+        - bash
+        - "-c"
+        - | 
+          set -ex
+          ls -la /mnt/
+          #Copy appropriate cassandra conf files from config-map to emptyDir.
+          echo "listing all config maps and their contents"
+          ls -la /mnt/config-map-cass/
+          ls -la /mnt/config-map-dse/
+          ls -la /mnt/config-map-spark/
+          echo "trying to mount config maps"
+          cp /mnt/config-map-cass/* /mnt/cassandra-conf/
+          ls -la /mnt/cassandra-conf/
+          # Copy appropriate dse conf files from config-map to emptyDir.
+          cp /mnt/config-map-dse/* /mnt/dse-conf/
+          ls -la /mnt/dse-conf/
+          # Copy appropriate spark conf files from config-map to emptyDir
+          cp /mnt/config-map-spark/* /mnt/spark-conf/
+          ls -la /mnt/spark-conf/
+          # poke in configuration that the docker image doesn't handle
+          while IFS='=' read -r name value ; do
+           # allow poking of all cassandra.yaml values with CASSYAML_
+           if [[ $name == 'CASSYAML_'* ]]; then
+             key=$(echo "$name" | sed -e 's/^CASSYAML_//')
+             value="${!name}"
+             echo "trying to set $key with $value in cassandra.yaml"
+             sed -ri 's/^(# )?('"$key"':).*/\2 '"$value"'/' /mnt/cassandra-conf/cassandra.yaml
+           fi
+           # allow poking of all dse.yaml values with DSEYAML_
+           if [[ $name == 'DSEYAML_'* ]]; then
+             key=$(echo "$name" | sed -e 's/^DSEYAML_//')
+             value="${!name}"
+             echo "trying to set $key with $value in dse.yaml"
+             sed -ri 's/^(# )?('"$key"':).*/\2 '"$value"'/' "/mnt/dse-conf/dse.yaml"
+           fi
+           # allow poking of all cassandra-env.sh values with CASSENV_
+           if [[ $name == 'CASSENV_'* ]]; then
+             key=$(echo "$name" | sed -e 's/^CASSENV_//')
+             value="${!name}"
+             echo "trying to set $key with $value in cassandra-env.sh"
+             # important difference from yaml, all the rows by params are not with a space after the comment
+             sed -ri 's/^(#)?('"$key"'=).*/\2 "'"\$value"'"/' "/mnt/cassandra-conf/cassandra-env.sh"
+           fi
+           # allow poking of all jvm-options values with CASSJVM_
+           if [[ $name == 'CASSJVM_'* ]]; then
+             key=$(echo "$name" | sed -e 's/^CASSJVM_//')
+             value="${!name}"
+             echo "trying to set $key with $value in jvm-options"
+             # important difference from yaml, all the rows by params are not with a space after the comment
+             sed -ri 's/^(#)?('"$key"'=).*/\2 "'"$value"'"/' "/mnt/cassandra-conf/jvm.options"
+             #TODO poke in spark and more dse options
+           fi
+           if [[ $name == 'DISK_ACCESS_MODE' ]]; then
+             value="${!name}"
+             if [[ $value != '' ]]; then 
+               echo "adding disk_access_mode to file"
+               echo "disk_access_mode: $DISK_ACCESS_MODE" >> /mnt/cassandra-conf/cassandra.yaml
+             fi
+           fi
+          done < <(env)
+        volumeMounts:
+        - name: cass-conf 
+          mountPath: /mnt/cassandra-conf
+        - name: cass-configmap
+          mountPath: /mnt/config-map-cass
+        - name: dse-conf 
+          mountPath: /mnt/dse-conf
+        - name: dse-configmap
+          mountPath: /mnt/config-map-dse
+        - name: spark-conf 
+          mountPath: /mnt/spark-conf
+        - name: spark-configmap
+          mountPath: /mnt/config-map-spark
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args: {{ .Values.image.args }}
+        ports:
+        - containerPort: 7000
+          name: intra-node
+        - containerPort: 7001
+          name: tls-intra-node
+        - containerPort: 7199
+          name: jmx
+        - containerPort: 9042
+          name: cql
+        readinessProbe:
+          tcpSocket:
+            port: 9042
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: "{{ .Values.resources.cpu }}"
+            memory: {{ .Values.resources.mem }}
+          requests:
+            cpu: "{{ .Values.resources.cpu }}"
+            memory: {{ .Values.resources.mem }}
+        securityContext:
+          capabilities:
+            add:
+              - IPC_LOCK
+        lifecycle:
+          preStop:
+            exec:
+              command: 
+              - /bin/sh
+              - -c
+              - nodetool drain
+        env:
+
+        {{- $seed_size := default 1 .Values.cassandra.seeds | int -}}
+        {{- $global := . }}
+          - name: DS_LICENSE
+            value: accept
+          - name: LISTEN_ADDRESS
+            valueFrom: 
+                fieldRef:
+                    fieldPath: metadata.name
+          - name: NATIVE_TRANSPORT_BROADCAST_ADDRESS
+            valueFrom: 
+                fieldRef:
+                    {{if .Values.use_external_ip }}
+                    fieldPath: status.hostIP
+                    {{else }}
+                    fieldPath: metadata.name
+                    {{end }}
+          - name: NUM_TOKENS
+            value: "{{ .Values.cassandra.num_tokens }}"
+          - name: JVM_EXTRA_OPTS 
+            value: "-Xms{{ .Values.cassandra.jvm.heap_size }} -Xmx{{ .Values.cassandra.jvm.heap_size }} {{ .Values.cassandra.jvm.extra }}"
+          - name: SEEDS
+            value: "{{- range $i, $e := until $seed_size }}{{ template "datastax-dse.fullname" $global }}-{{ $i }}.{{ template "datastax-dse.fullname" $global }}.{{ $global.Release.Namespace }}.svc.cluster.local{{- if (lt ( add1 $i ) $seed_size ) }},{{- end }}{{- end }}"
+          - name: CLUSTER_NAME
+            value: {{ .Values.cassandra.cluster_name | quote }}
+          - name: DC
+            value: "{{ .Values.cassandra.dc }}"
+          - name: RACK 
+            value: "{{ .Values.cassandra.rack }}"
+          - name: DSE_AUTO_CONF_OFF
+            value: ""
+        volumeMounts:
+        - name: cass-conf
+          mountPath: /opt/dse/resources/cassandra/conf
+        - name: dse-conf
+          mountPath: /opt/dse/resources/dse/conf
+        - name: spark-conf
+          mountPath: /opt/dse/resources/spark/conf
+        - name: cassandra-data-{{ include "datastax-dse.fullname" . }}
+          mountPath: /var/lib/cassandra
+        {{- if .Values.storage.cassandra.logs.enable }}
+        - name: cassandra-logs-{{ include "datastax-dse.fullname" . }}
+          mountPath: /var/log/cassandra
+        {{- end }}
+        {{- if .Values.storage.dsefs.enable }}
+        - name: dsefs-data-{{ include "datastax-dse.fullname" . }}
+          mountPath: /var/lib/dsefs
+        {{- end }}
+        {{- if .Values.storage.spark.enable }}
+        - name: spark-data-{{ include "datastax-dse.fullname" . }}
+          mountPath: /var/lib/spark
+        - name: spark-logs-{{ include "datastax-dse.fullname" . }}
+          mountPath: /var/log/spark
+        {{- end }}
+      volumes:
+      - name: cass-conf
+        emptyDir: {}
+      - name: cass-configmap
+        configMap:
+          name: {{ template "datastax-dse.fullname" .}}-cass-configuration
+      - name: dse-conf
+        emptyDir: {}
+      - name: dse-configmap
+        configMap:
+          name: {{ template "datastax-dse.fullname" .}}-dse-configuration
+      - name: spark-conf
+        emptyDir: {}
+      - name: spark-configmap
+        configMap:
+          name: {{ template "datastax-dse.fullname" .}}-spark-configuration
+  volumeClaimTemplates:
+  - metadata:
+      name: cassandra-data-{{ include "datastax-dse.fullname" . }}
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.storage.cassandra.data.size }}
+  {{- if .Values.storage.cassandra.logs.enable }}
+  - metadata:
+      name: cassandra-logs-{{ include "datastax-dse.fullname" . }}
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.storage.cassandra.logs.size }}
+  {{- end }}
+  {{- if .Values.storage.spark.enable }}
+  - metadata:
+      name: spark-data-{{ include "datastax-dse.fullname" . }}
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.storage.spark.data.size }}
+  - metadata:
+      name: spark-logs-{{ include "datastax-dse.fullname" . }}
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.storage.spark.logs.size }}
+  {{- end }}
+  {{- if .Values.storage.dsefs.enable }}
+  - metadata:
+      name: dsefs-{{ include "datastax-dse.fullname" . }}
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.storage.dsefs.size }}
+  {{- end }}

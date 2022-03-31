@@ -1,0 +1,33 @@
+# Sized to work on 1 k8s workers node with 2 cores / 4 GB RAM
+apiVersion: cassandra.datastax.com/v1beta1
+kind: CassandraDatacenter
+metadata:
+  name: dc1
+spec:
+  clusterName: SolrTraining
+  serverType: dse
+  serverVersion: "6.8.20"
+  managementApiAuth:
+    insecure: {}
+  dseWorkloads:
+    searchEnabled: true
+  size: 2
+  storageConfig:
+    cassandraDataVolumeClaimSpec:
+      storageClassName: local-path
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 20Gi
+  config:
+    jvm-server-options:
+      initial_heap_size: "2000M"
+      max_heap_size: "2000M"
+      max_direct_memory: "800M"
+      additional-jvm-opts:
+        # As the database comes up for the first time, set system keyspaces to RF=3
+        - "-Ddse.system_distributed_replication_dc_names=dc1"
+        - "-Ddse.system_distributed_replication_per_dc=1"
+    cassandra-yaml:
+      file_cache_size_in_mb: 512

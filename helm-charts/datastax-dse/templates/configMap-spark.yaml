@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "datastax-dse.fullname" . }}-spark-configuration
+  labels:
+    app: {{ template "datastax-dse.name" . }}
+    chart: {{ template "datastax-dse.chart" . }}
+    release: {{ .Release.Name | quote }}
+    heritage: {{ .Release.Service | quote }}
+data:
+{{ $dir := include "datastax-dse.filevg-spark" .}}
+{{- (.Files.Glob $dir).AsConfig | nindent 2 }}

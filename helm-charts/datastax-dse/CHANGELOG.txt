@@ -1,0 +1,18 @@
+datastax-dse
+============
+
+0.2.1
+=====
+* support for solr http via nodeport
+
+0.2.0
+=====
+* added support for external ips via nodeport
+* tpc_cores in the values
+* bigger node defaults
+
+0.1.0
+=====
+* statefulset support
+* changing configuration via env variables in init script
+* all works with official datastax-images
